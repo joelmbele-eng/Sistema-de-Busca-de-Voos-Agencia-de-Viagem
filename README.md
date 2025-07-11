@@ -107,3 +107,4 @@ Gerenciamento eficiente de memória e recursos
 Seleção rápida de aeroportos com botões dedicados
 Campos de entrada com placeholders informativos
 Operações intuitivas sem necessidade de treinamento extenso
+# Dev Joel Mbele Makengo Pais: Angola - Luanda Tel-Whatsapp: +244 942 688 960
