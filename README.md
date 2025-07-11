@@ -5,21 +5,21 @@ Este é um Sistema Completo de Busca de Voos desenvolvido em Python com interfac
 
 # Principais Funcionalidades
 
-1. Interface Gráfica Moderna
+# 1. Interface Gráfica Moderna
 Interface desenvolvida com CustomTkinter para aparência moderna e responsiva
 Layout dividido em três painéis principais para melhor organização
 Tema escuro profissional com cores personalizadas
 Componentes interativos com feedback visual
-2. Busca de Voos em Tempo Real
-Integração com a Aviation Stack API para dados atualizados
+# 2. Busca de Voos em Tempo Real
+# Integração com a Aviation Stack API para dados atualizados
 Busca por código IATA de origem e destino
 Exibição de informações detalhadas dos voos:
 Número do voo e companhia aérea
 Horários de partida e chegada
 # Status do voo em tempo real
 Aeroportos de origem e destino
-![image alt](https://github.com/joelmbele-eng/Sistema-de-Busca-de-Voos-Agencia-de-Viagem/blob/23f4afeb095ccbcc98cc73587228339c8b8ee36c/2.PNG)
-3. Base de Dados de Aeroportos
+
+# 3. Base de Dados de Aeroportos
 Catálogo abrangente com aeroportos de 5 continentes:
 África: Luanda, Joanesburgo, Cairo
 Europa: Lisboa, Paris, Londres
@@ -28,13 +28,15 @@ Américas: São Paulo, Nova York, Toronto
 Oceania: Sydney, Auckland, Nadi
 Coordenadas geográficas precisas para cada aeroporto
 Interface de seleção rápida com botões de origem/destino
-4. Visualização de Rotas
+# 4. Visualização de Rotas
+![image alt](https://github.com/joelmbele-eng/Sistema-de-Busca-de-Voos-Agencia-de-Viagem/blob/23f4afeb095ccbcc98cc73587228339c8b8ee36c/2.PNG)
 Mapa interativo mostrando a rota entre origem e destino
 Representação visual com marcadores coloridos
 Cálculo automático de distância aproximada entre aeroportos
 Geração de mapas interativos com Folium que abrem no navegador
 Canvas personalizado para visualização rápida das rotas
-5. Geração de Relatórios PDF
+# 5. Geração de Relatórios PDF
+![image alt](https://github.com/joelmbele-eng/Sistema-de-Busca-de-Voos-Agencia-de-Viagem/blob/cb4f0aa3c10177d4da4c4977eb4f4c99d5e84f10/3.PNG)
 Criação automática de relatórios profissionais em PDF
 Informações incluídas:
 Tabela completa com todos os voos encontrados
