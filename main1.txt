@@ -1,0 +1,819 @@
+import customtkinter as ctk
+import requests
+from datetime import datetime
+import os
+from dotenv import load_dotenv
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import fitz
+from PIL import Image, ImageTk
+import io
+import folium
+from folium import plugins
+import tempfile
+import threading
+import webbrowser
+
+class SistemaVoos(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        load_dotenv()
+        
+        self.title("Sistema de Busca de Voos")
+        self.geometry("1600x900")
+        self.configure(fg_color="#2b2b2b")
+        
+        self.api_key = os.getenv('AVIATION_API_KEY')
+        self.base_url = "http://api.aviationstack.com/v1/flights"
+        
+        self.aeroportos = {
+            "África": {
+                "LAD": {"nome": "Luanda, Angola", "coords": [-8.8583, 13.2312]},
+                "JNB": {"nome": "Joanesburgo, África do Sul", "coords": [-26.1367, 28.2411]},
+                "CAI": {"nome": "Cairo, Egito", "coords": [30.1219, 31.4056]}
+            },
+            "Europa": {
+                "LIS": {"nome": "Lisboa, Portugal", "coords": [38.7813, -9.1359]},
+                "CDG": {"nome": "Paris, França", "coords": [49.0097, 2.5479]},
+                "LHR": {"nome": "Londres, Reino Unido", "coords": [51.4700, -0.4543]}
+            },
+            "Américas": {
+                "GRU": {"nome": "São Paulo, Brasil", "coords": [-23.4356, -46.4731]},
+                "JFK": {"nome": "Nova York, EUA", "coords": [40.6413, -73.7781]},
+                "YYZ": {"nome": "Toronto, Canadá", "coords": [43.6777, -79.6248]}
+            },
+            "Ásia": {
+                "HND": {"nome": "Tóquio, Japão", "coords": [35.5494, 139.7798]},
+                "SIN": {"nome": "Singapura", "coords": [1.3644, 103.9915]},
+                "DXB": {"nome": "Dubai, Emirados Árabes", "coords": [25.2532, 55.3657]}
+            },
+            "Oceania": {
+                "SYD": {"nome": "Sydney, Austrália", "coords": [-33.9399, 151.1753]},
+                "AKL": {"nome": "Auckland, Nova Zelândia", "coords": [-37.0082, 174.7850]},
+                "NAN": {"nome": "Nadi, Fiji", "coords": [-17.7556, 177.4425]}
+            }
+        }
+        
+        self.criar_interface()
+        self.criar_frame_relatorios()
+        
+    def criar_interface(self):
+        # Configuração dos frames principais
+        self.frame_esquerda = ctk.CTkFrame(self)
+        self.frame_esquerda.pack(side="left", pady=20, padx=10, fill="both", expand=False)
+        
+        self.frame_central = ctk.CTkFrame(self)
+        self.frame_central.pack(side="left", pady=20, padx=10, fill="both", expand=True)
+        
+        self.frame_direita = ctk.CTkFrame(self)
+        self.frame_direita.pack(side="right", pady=20, padx=10, fill="both", expand=True)
+        
+        # Criação dos componentes da interface
+        self.criar_frame_busca()
+        self.criar_frame_aeroportos()
+        self.criar_area_resultados()
+        self.criar_visualizador_mapa()
+        self.criar_visualizador_pdf()
+        
+    def criar_frame_busca(self):
+        frame_busca = ctk.CTkFrame(self.frame_esquerda)
+        frame_busca.pack(pady=20, padx=20, fill="x")
+        
+        titulo = ctk.CTkLabel(
+            frame_busca,
+            text="Sistema de Busca de Voos",
+            font=("Roboto", 24, "bold"),
+            text_color="#ffffff"
+        )
+        titulo.pack(pady=20)
+        
+        # Campo de origem
+        ctk.CTkLabel(frame_busca, text="Origem:", font=("Roboto", 14)).pack()
+        self.origem_entry = ctk.CTkEntry(
+            frame_busca,
+            placeholder_text="Digite o código IATA (ex: LAD)",
+            width=200
+        )
+        self.origem_entry.pack(pady=5)
+        
+        # Campo de destino
+        ctk.CTkLabel(frame_busca, text="Destino:", font=("Roboto", 14)).pack()
+        self.destino_entry = ctk.CTkEntry(
+            frame_busca,
+            placeholder_text="Digite o código IATA (ex: LIS)",
+            width=200
+        )
+        self.destino_entry.pack(pady=5)
+        
+        # Botão de busca
+        self.botao_buscar = ctk.CTkButton(
+            frame_busca,
+            text="Buscar Voos",
+            command=self.buscar_voos,
+            font=("Roboto", 14),
+            fg_color="#007bff",
+            hover_color="#0056b3",
+            width=200
+        )
+        self.botao_buscar.pack(pady=20)
+        
+        # Indicador de carregamento
+        self.indicador_carregamento = ctk.CTkProgressBar(frame_busca, width=200)
+        self.indicador_carregamento.pack(pady=5)
+        self.indicador_carregamento.set(0)
+        
+    def criar_frame_aeroportos(self):
+        frame_aeroportos = ctk.CTkFrame(self.frame_esquerda)
+        frame_aeroportos.pack(pady=20, padx=20, fill="x")
+        
+        ctk.CTkLabel(
+            frame_aeroportos,
+            text="Aeroportos Populares",
+            font=("Roboto", 18, "bold")
+        ).pack(pady=10)
+        
+        # Criar um frame com scroll para os aeroportos
+        aeroportos_scroll = ctk.CTkScrollableFrame(frame_aeroportos, height=300)
+        aeroportos_scroll.pack(fill="x", pady=5)
+        
+        for regiao, aeroportos in self.aeroportos.items():
+            frame_regiao = ctk.CTkFrame(aeroportos_scroll)
+            frame_regiao.pack(fill="x", pady=5, padx=5)
+            
+            ctk.CTkLabel(
+                frame_regiao,
+                text=regiao,
+                font=("Roboto", 16, "bold")
+            ).pack(pady=5, anchor="w")
+            
+            for codigo, info in aeroportos.items():
+                frame_aeroporto = ctk.CTkFrame(frame_regiao)
+                frame_aeroporto.pack(fill="x", pady=2)
+                
+                ctk.CTkLabel(
+                    frame_aeroporto,
+                    text=f"{codigo} - {info['nome']}",
+                    font=("Roboto", 14)
+                ).pack(side="left", padx=5)
+                
+                ctk.CTkButton(
+                    frame_aeroporto,
+                    text="Origem",
+                    command=lambda c=codigo: self.definir_origem(c),
+                    font=("Roboto", 12),
+                    width=60,
+                    height=25,
+                    fg_color="#28a745"
+                ).pack(side="right", padx=2)
+                
+                ctk.CTkButton(
+                    frame_aeroporto,
+                    text="Destino",
+                    command=lambda c=codigo: self.definir_destino(c),
+                    font=("Roboto", 12),
+                    width=60,
+                    height=25,
+                    fg_color="#dc3545"
+                ).pack(side="right", padx=2)
+
+    def definir_origem(self, codigo):
+        self.origem_entry.delete(0, "end")
+        self.origem_entry.insert(0, codigo)
+        
+    def definir_destino(self, codigo):
+        self.destino_entry.delete(0, "end")
+        self.destino_entry.insert(0, codigo)
+
+    def criar_frame_relatorios(self):
+        frame_relatorios = ctk.CTkFrame(self.frame_central)
+        frame_relatorios.pack(pady=20, padx=20, fill="x")
+        
+        ctk.CTkLabel(
+            frame_relatorios,
+            text="Relatórios Gerados",
+            font=("Roboto", 18, "bold")
+        ).pack(pady=10)
+        
+        ctk.CTkButton(
+            frame_relatorios,
+            text="Atualizar Relatórios",
+            command=self.atualizar_lista_relatorios,
+            font=("Roboto", 12),
+            fg_color="#28a745",
+            hover_color="#218838",
+            width=150
+        ).pack(pady=5)
+        
+        self.lista_relatorios = ctk.CTkScrollableFrame(
+            frame_relatorios,
+            height=200
+        )
+        self.lista_relatorios.pack(fill="x", pady=5)
+        
+        self.atualizar_lista_relatorios()
+    
+    def criar_area_resultados(self):
+        frame_resultados = ctk.CTkFrame(self.frame_central)
+        frame_resultados.pack(pady=20, padx=20, fill="both", expand=True)
+        
+        ctk.CTkLabel(
+            frame_resultados,
+            text="Resultados da Busca",
+            font=("Roboto", 18, "bold")
+        ).pack(pady=10)
+        
+        self.resultado_text = ctk.CTkTextbox(
+            frame_resultados,
+            height=400,
+            font=("Roboto", 14)
+        )
+        self.resultado_text.pack(pady=10, padx=10, fill="both", expand=True)
+        
+    def criar_visualizador_mapa(self):
+        self.frame_mapa = ctk.CTkFrame(self.frame_direita)
+        self.frame_mapa.pack(pady=10, padx=10, fill="both", expand=True)
+        
+        titulo_mapa = ctk.CTkLabel(
+            self.frame_mapa,
+            text="Visualização da Rota",
+            font=("Roboto", 20, "bold")
+        )
+        titulo_mapa.pack(pady=10)
+        
+        self.mapa_container = ctk.CTkFrame(self.frame_mapa)
+        self.mapa_container.pack(pady=10, padx=10, fill="both", expand=True)
+        
+        # Mensagem inicial
+        ctk.CTkLabel(
+            self.mapa_container,
+            text="Selecione origem e destino para visualizar a rota",
+            font=("Roboto", 14)
+        ).pack(pady=50)
+
+    def criar_visualizador_pdf(self):
+        self.frame_pdf = ctk.CTkFrame(self.frame_direita)
+        self.frame_pdf.pack(pady=10, padx=10, fill="both", expand=True)
+        
+        titulo_pdf = ctk.CTkLabel(
+            self.frame_pdf,
+            text="Visualizador de Relatório",
+            font=("Roboto", 20, "bold")
+        )
+        titulo_pdf.pack(pady=10)
+        
+        # Frame para os controles de navegação do PDF
+        self.controles_pdf = ctk.CTkFrame(self.frame_pdf)
+        self.controles_pdf.pack(pady=5, fill="x")
+        
+        # Botões de zoom
+        self.btn_zoom_in = ctk.CTkButton(
+            self.controles_pdf,
+            text="Zoom +",
+            command=lambda: self.ajustar_zoom(1.25),
+            font=("Roboto", 12),
+            width=80,
+            fg_color="#6c757d"
+        )
+        self.btn_zoom_in.pack(side="left", padx=5)
+        
+        self.btn_zoom_out = ctk.CTkButton(
+            self.controles_pdf,
+            text="Zoom -",
+            command=lambda: self.ajustar_zoom(0.8),
+            font=("Roboto", 12),
+            width=80,
+            fg_color="#6c757d"
+        )
+        self.btn_zoom_out.pack(side="left", padx=5)
+        
+        # Botão para ajustar à janela
+        self.btn_fit = ctk.CTkButton(
+            self.controles_pdf,
+            text="Ajustar à Janela",
+            command=self.ajustar_a_janela,
+            font=("Roboto", 12),
+            width=120,
+            fg_color="#6c757d"
+        )
+        self.btn_fit.pack(side="left", padx=5)
+        
+        # Frame para o canvas com scrollbars
+        self.pdf_frame = ctk.CTkFrame(self.frame_pdf)
+        self.pdf_frame.pack(pady=5, padx=5, fill="both", expand=True)
+        
+        # Scrollbars
+        self.pdf_scrollbar_y = ctk.CTkScrollbar(self.pdf_frame, orientation="vertical")
+        self.pdf_scrollbar_y.pack(side="right", fill="y")
+        
+        self.pdf_scrollbar_x = ctk.CTkScrollbar(self.pdf_frame, orientation="horizontal")
+        self.pdf_scrollbar_x.pack(side="bottom", fill="x")
+        
+        # Canvas para o PDF
+        self.pdf_canvas = ctk.CTkCanvas(
+            self.pdf_frame,
+            width=600,
+            height=800,
+            bg="#ffffff",
+            xscrollcommand=self.pdf_scrollbar_x.set,
+            yscrollcommand=self.pdf_scrollbar_y.set
+        )
+        self.pdf_canvas.pack(fill="both", expand=True)
+        
+        # Configurar scrollbars
+        self.pdf_scrollbar_y.configure(command=self.pdf_canvas.yview)
+        self.pdf_scrollbar_x.configure(command=self.pdf_canvas.xview)
+        
+        # Variáveis para controle do PDF
+        self.pdf_atual = None
+        self.zoom_fator = 1.0
+        
+    def ajustar_zoom(self, fator):
+        if self.pdf_atual:
+            self.zoom_fator *= fator
+            self.mostrar_pdf(self.pdf_atual, manter_zoom=True)
+    
+    def ajustar_a_janela(self):
+        if self.pdf_atual:
+            # Resetar o zoom e ajustar à janela
+            self.zoom_fator = 1.0
+            self.mostrar_pdf(self.pdf_atual, ajustar_janela=True)
+    
+    def mostrar_rota_mapa(self, origem, destino):
+        origem_info = self.encontrar_aeroporto(origem)
+        destino_info = self.encontrar_aeroporto(destino)
+        
+        if not origem_info or not destino_info:
+            self.mostrar_resultado("Aeroporto não encontrado na base de dados.")
+            return
+        
+        # Limpar o container do mapa
+        for widget in self.mapa_container.winfo_children():
+            widget.destroy()
+        
+        # Mensagem de carregamento
+        label_carregando = ctk.CTkLabel(
+            self.mapa_container,
+            text="Carregando mapa...",
+            font=("Roboto", 14)
+        )
+        label_carregando.pack(pady=20)
+        self.update()  # Atualizar a interface para mostrar a mensagem
+        
+        try:
+            # Calcular o centro do mapa e a distância para determinar o zoom
+            centro_lat = (origem_info['coords'][0] + destino_info['coords'][0]) / 2
+            centro_lon = (origem_info['coords'][1] + destino_info['coords'][1]) / 2
+            
+            # Usar a API do OpenStreetMap para gerar um mapa estático
+            url = (
+                f"https://staticmap.openstreetmap.de/staticmap.php"
+                f"?center={centro_lat},{centro_lon}&zoom=3&size=600x400"
+                f"&markers={origem_info['coords'][0]},{origem_info['coords'][1]},red"
+                f"|{destino_info['coords'][0]},{destino_info['coords'][1]},green"
+                f"&path={origem_info['coords'][0]},{origem_info['coords'][1]}|{destino_info['coords'][0]},{destino_info['coords'][1]}"
+            )
+            
+            response = requests.get(url)
+            response.raise_for_status()
+            
+            # Remover a mensagem de carregamento
+            label_carregando.destroy()
+            
+            # Converter para imagem do PIL
+            img = Image.open(io.BytesIO(response.content))
+            photo = ImageTk.PhotoImage(img)
+            
+            # Exibir a imagem
+            canvas = ctk.CTkCanvas(
+                self.mapa_container,
+                width=600,
+                height=400
+            )
+            canvas.pack(fill="both", expand=True)
+            canvas.create_image(0, 0, anchor="nw", image=photo)
+            canvas.image = photo  # Manter referência para evitar coleta de lixo
+            
+            # Adicionar legenda
+            legenda_frame = ctk.CTkFrame(self.mapa_container)
+            legenda_frame.pack(fill="x", pady=5)
+            
+            ctk.CTkLabel(
+                legenda_frame,
+                text="🔴 Origem: " + origem_info['nome'],
+                font=("Roboto", 12)
+            ).pack(side="left", padx=10)
+            
+            ctk.CTkLabel(
+                legenda_frame,
+                text="🟢 Destino: " + destino_info['nome'],
+                font=("Roboto", 12)
+            ).pack(side="right", padx=10)
+            
+            # Adicionar informações adicionais
+            info_frame = ctk.CTkFrame(self.mapa_container)
+            info_frame.pack(fill="x", pady=5)
+            
+            # Calcular distância aproximada (em km) usando a fórmula de Haversine
+            from math import radians, sin, cos, sqrt, atan2
+            
+            def calcular_distancia(lat1, lon1, lat2, lon2):
+                R = 6371  # Raio da Terra em km
+                dLat = radians(lat2 - lat1)
+                dLon = radians(lon2 - lon1)
+                a = sin(dLat/2) * sin(dLat/2) + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon/2) * sin(dLon/2)
+                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                distancia = R * c
+                return round(distancia)
+            
+            distancia = calcular_distancia(
+                origem_info['coords'][0], origem_info['coords'][1],
+                destino_info['coords'][0], destino_info['coords'][1]
+            )
+            
+            ctk.CTkLabel(
+                info_frame,
+                text=f"Distância aproximada: {distancia} km",
+                font=("Roboto", 12, "bold")
+            ).pack(pady=5)
+            
+        except Exception as e:
+            # Se falhar, mostrar mensagem de erro
+            label_carregando.destroy()
+            
+            erro_frame = ctk.CTkFrame(self.mapa_container)
+            erro_frame.pack(fill="both", expand=True)
+            
+            ctk.CTkLabel(
+                erro_frame,
+                text=f"Erro ao carregar mapa: {str(e)}",
+                font=("Roboto", 14),
+                text_color="red"
+            ).pack(pady=20)
+            
+            # Registrar erro no console para debug
+            print(f"Erro ao carregar mapa: {str(e)}")
+    
+    def encontrar_aeroporto(self, codigo):
+        for regiao in self.aeroportos.values():
+            if codigo in regiao:
+                return {
+                    'nome': regiao[codigo]['nome'],
+                    'coords': regiao[codigo]['coords']
+                }
+        return None
+    
+    def atualizar_lista_relatorios(self):
+        for widget in self.lista_relatorios.winfo_children():
+            widget.destroy()
+        
+        if not os.path.exists('relatorios'):
+            os.makedirs('relatorios')
+            ctk.CTkLabel(
+                self.lista_relatorios,
+                text="Nenhum relatório encontrado",
+                font=("Roboto", 12)
+            ).pack(pady=10)
+            return
+        
+        pdfs = [f for f in os.listdir('relatorios') if f.endswith('.pdf')]
+        pdfs.sort(reverse=True)
+        
+        if not pdfs:
+            ctk.CTkLabel(
+                self.lista_relatorios,
+                text="Nenhum relatório encontrado",
+                font=("Roboto", 12)
+            ).pack(pady=10)
+            return
+        
+        for pdf in pdfs:
+            frame_pdf = ctk.CTkFrame(self.lista_relatorios)
+            frame_pdf.pack(fill="x", pady=2, padx=5)
+            
+            ctk.CTkLabel(
+                frame_pdf,
+                text=pdf,
+                font=("Roboto", 12)
+            ).pack(side="left", padx=5)
+            
+            ctk.CTkButton(
+                frame_pdf,
+                text="Ver",
+                command=lambda p=pdf: self.mostrar_pdf(f"relatorios/{p}"),
+                font=("Roboto", 12),
+                width=50,
+                fg_color="#007bff"
+            ).pack(side="right", padx=5)
+            
+            ctk.CTkButton(
+                frame_pdf,
+                text="Excluir",
+                command=lambda p=pdf: self.excluir_relatorio(f"relatorios/{p}"),
+                font=("Roboto", 12),
+                width=50,
+                fg_color="#dc3545"
+            ).pack(side="right", padx=5)
+    
+    def excluir_relatorio(self, pdf_path):
+        try:
+            os.remove(pdf_path)
+            self.atualizar_lista_relatorios()
+            self.mostrar_resultado(f"Relatório excluído: {os.path.basename(pdf_path)}")
+        except Exception as e:
+            self.mostrar_resultado(f"Erro ao excluir relatório: {str(e)}")
+    
+    def mostrar_pdf(self, pdf_path, manter_zoom=False, ajustar_janela=False):
+        try:
+            self.pdf_atual = pdf_path
+            
+            # Limpar botões anteriores específicos do PDF
+            for widget in self.controles_pdf.winfo_children():
+                if isinstance(widget, ctk.CTkButton) and widget not in [self.btn_zoom_in, self.btn_zoom_out, self.btn_fit]:
+                    widget.destroy()
+            
+            # Adicionar botão para abrir o PDF externamente
+            ctk.CTkButton(
+                self.controles_pdf,
+                text="Abrir no Visualizador",
+                command=lambda: webbrowser.open(f"file://{os.path.abspath(pdf_path)}"),
+                font=("Roboto", 12),
+                width=150,
+                fg_color="#28a745"
+            ).pack(side="right", padx=5)
+            
+            # Abrir o documento PDF
+            doc = fitz.open(pdf_path)
+            page = doc[0]  # Primeira página
+            
+            # Determinar o fator de zoom
+            if ajustar_janela:
+                # Calcular o fator de zoom para ajustar à janela
+                canvas_width = self.pdf_canvas.winfo_width()
+                canvas_height = self.pdf_canvas.winfo_height()
+                
+                if canvas_width <= 1 or canvas_height <= 1:  # Se o canvas ainda não foi renderizado
+                    canvas_width = 600
+                    canvas_height = 800
+                
+                page_width = page.rect.width
+                page_height = page.rect.height
+                
+                width_ratio = canvas_width / page_width
+                height_ratio = canvas_height / page_height
+                
+                # Usar o menor ratio para garantir que a página inteira seja visível
+                self.zoom_fator = min(width_ratio, height_ratio) * 0.95  # 95% para dar uma margem
+            
+            # Aplicar o zoom
+            matriz_zoom = fitz.Matrix(self.zoom_fator * 2, self.zoom_fator * 2)  # Multiplicar por 2 para melhor qualidade
+            pix = page.get_pixmap(matrix=matriz_zoom)
+            
+            # Converter para imagem PIL
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            photo = ImageTk.PhotoImage(img)
+            
+            # Limpar o canvas e exibir a imagem
+            self.pdf_canvas.delete("all")
+            self.pdf_canvas.config(scrollregion=(0, 0, img.width, img.height))
+            self.pdf_canvas.create_image(0, 0, anchor="nw", image=photo)
+            self.pdf_canvas.image = photo  # Manter referência para evitar coleta de lixo
+            
+            # Se for ajustar à janela, centralizar a visualização
+            if ajustar_janela:
+                self.pdf_canvas.xview_moveto(0)
+                self.pdf_canvas.yview_moveto(0)
+            
+            # Mostrar informações do PDF
+            nome_arquivo = os.path.basename(pdf_path)
+            data_criacao = datetime.fromtimestamp(os.path.getctime(pdf_path)).strftime("%d/%m/%Y %H:%M")
+            
+            info = f"Arquivo: {nome_arquivo} | Criado em: {data_criacao} | Zoom: {int(self.zoom_fator * 100)}%"
+            
+            # Atualizar o título do frame
+            for widget in self.frame_pdf.winfo_children():
+                if isinstance(widget, ctk.CTkLabel) and widget.cget("text") == "Visualizador de Relatório":
+                    widget.configure(text=f"Visualizador de Relatório - {nome_arquivo}")
+                    break
+            
+        except Exception as e:
+            self.pdf_canvas.delete("all")
+            self.pdf_canvas.create_text(
+                300, 400,
+                text=f"Erro ao abrir PDF: {str(e)}",
+                fill="red",
+                font=("Helvetica", 14)
+            )
+            print(f"Erro ao abrir PDF: {str(e)}")
+        
+    def gerar_pdf(self, dados, origem, destino):
+        if not os.path.exists('relatorios'):
+            os.makedirs('relatorios')
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"relatorios/voos_{origem}_{destino}_{timestamp}.pdf"
+        
+        doc = SimpleDocTemplate(filename, pagesize=A4)
+        elementos = []
+        styles = getSampleStyleSheet()
+        
+        # Estilo personalizado para o título
+        titulo_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=1
+        )
+        
+        # Adicionar título e subtítulo
+        titulo = Paragraph(
+            f"Relatório de Voos<br/>De: {origem} Para: {destino}",
+            titulo_style
+        )
+        elementos.append(titulo)
+        
+        subtitulo = Paragraph(
+            f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            styles['Heading2']
+        )
+        elementos.append(subtitulo)
+        elementos.append(Spacer(1, 20))
+        
+        # Criar tabela com os dados dos voos
+        cabecalho = ['Voo', 'Companhia', 'Origem', 'Destino', 'Partida', 'Status']
+        dados_tabela = [cabecalho]
+        
+        for voo in dados['data']:
+            linha = [
+                voo['flight']['iata'],
+                voo['airline']['name'],
+                f"{voo['departure']['airport']}",
+                f"{voo['arrival']['airport']}",
+                self.formatar_data(voo['departure']['scheduled']),
+                voo['flight_status'].upper()
+            ]
+            dados_tabela.append(linha)
+        
+        tabela = Table(dados_tabela, repeatRows=1)
+        tabela.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.blue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.whitesmoke, colors.white])
+        ]))
+        
+        elementos.append(tabela)
+        
+        # Adicionar informações sobre os aeroportos
+        elementos.append(Spacer(1, 30))
+        elementos.append(Paragraph("Informações dos Aeroportos", styles['Heading2']))
+        
+        origem_info = self.encontrar_aeroporto(origem)
+        destino_info = self.encontrar_aeroporto(destino)
+        
+        if origem_info:
+            elementos.append(Paragraph(f"<b>Origem:</b> {origem} - {origem_info['nome']}", styles['Normal']))
+        
+        if destino_info:
+            elementos.append(Paragraph(f"<b>Destino:</b> {destino} - {destino_info['nome']}", styles['Normal']))
+        
+        # Adicionar informações de distância se ambos os aeroportos forem conhecidos
+        if origem_info and destino_info:
+            from math import radians, sin, cos, sqrt, atan2
+            
+            def calcular_distancia(lat1, lon1, lat2, lon2):
+                R = 6371  # Raio da Terra em km
+                dLat = radians(lat2 - lat1)
+                dLon = radians(lon2 - lon1)
+                a = sin(dLat/2) * sin(dLat/2) + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon/2) * sin(dLon/2)
+                c = 2 * atan2(sqrt(a), sqrt(1-a))
+                distancia = R * c
+                return round(distancia)
+            
+            distancia = calcular_distancia(
+                origem_info['coords'][0], origem_info['coords'][1],
+                destino_info['coords'][0], destino_info['coords'][1]
+            )
+            
+            elementos.append(Paragraph(f"<b>Distância aproximada:</b> {distancia} km", styles['Normal']))
+        
+        # Adicionar informações sobre o relatório
+        elementos.append(Spacer(1, 30))
+        elementos.append(Paragraph("Informações do Relatório", styles['Heading2']))
+        elementos.append(Paragraph(f"<b>Total de voos encontrados:</b> {len(dados['data'])}", styles['Normal']))
+        elementos.append(Paragraph(f"<b>Data de geração:</b> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['Normal']))
+        
+        # Construir o PDF
+        doc.build(elementos)
+        
+        self.mostrar_pdf(filename, ajustar_janela=True)
+        self.atualizar_lista_relatorios()
+        return filename
+    
+    def formatar_data(self, data_string):
+        if not data_string:
+            return "N/A"
+        try:
+            data = datetime.fromisoformat(data_string.replace('Z', '+00:00'))
+            return data.strftime("%d/%m/%Y %H:%M")
+        except:
+            return data_string
+    
+    def buscar_voos(self):
+        origem = self.origem_entry.get().upper()
+        destino = self.destino_entry.get().upper()
+        
+        if not origem or not destino:
+            self.mostrar_resultado("Por favor, preencha origem e destino!")
+            return
+        
+        # Desativar botão de busca durante a operação
+        self.botao_buscar.configure(state="disabled", text="Buscando...")
+        self.indicador_carregamento.set(0.2)
+        self.mostrar_resultado(f"Buscando voos de {origem} para {destino}...\n")
+        
+        # Executar a busca em uma thread separada para não bloquear a interface
+        threading.Thread(target=self._executar_busca, args=(origem, destino)).start()
+    
+    def _executar_busca(self, origem, destino):
+        try:
+            # Atualizar progresso
+            self.after(0, lambda: self._atualizar_progresso(0.4))
+            
+            # Mostrar o mapa na thread principal
+            self.after(0, lambda: self.mostrar_rota_mapa(origem, destino))
+            
+            # Preparar parâmetros da API
+            self.after(0, lambda: self._atualizar_progresso(0.6))
+            params = {
+                'access_key': self.api_key,
+                'dep_iata': origem,
+                'arr_iata': destino,
+                'limit': 10
+            }
+            
+            # Fazer a requisição à API
+            response = requests.get(self.base_url, params=params)
+            response.raise_for_status()
+            dados = response.json()
+            
+            self.after(0, lambda: self._atualizar_progresso(0.8))
+            
+            # Verificar se há dados
+            if not dados.get('data') or len(dados['data']) == 0:
+                self.after(0, lambda: self.mostrar_resultado("Nenhum voo encontrado para esta rota."))
+                self.after(0, lambda: self._atualizar_progresso(0))
+                self.after(0, lambda: self.botao_buscar.configure(state="normal", text="Buscar Voos"))
+                return
+            
+            # Exibir resultados e gerar PDF
+            self.after(0, lambda: self.exibir_resultados(dados))
+            self.after(0, lambda: self.gerar_pdf(dados, origem, destino))
+            
+        except requests.exceptions.RequestException as e:
+            self.after(0, lambda: self.mostrar_resultado(f"Erro na busca: {str(e)}"))
+        except Exception as e:
+            self.after(0, lambda: self.mostrar_resultado(f"Erro inesperado: {str(e)}"))
+        finally:
+            # Restaurar interface
+            self.after(0, lambda: self._atualizar_progresso(0))
+            self.after(0, lambda: self.botao_buscar.configure(state="normal", text="Buscar Voos"))
+    
+    def _atualizar_progresso(self, valor):
+        self.indicador_carregamento.set(valor)
+    
+    def mostrar_resultado(self, texto):
+        # Atualizar a interface a partir da thread principal
+        self.after(0, lambda: self._atualizar_texto_resultado(texto))
+    
+    def _atualizar_texto_resultado(self, texto):
+        self.resultado_text.delete("1.0", "end")
+        self.resultado_text.insert("1.0", texto)
+        
+    def exibir_resultados(self, dados):
+        resultado = "\n=== Voos Encontrados ===\n\n"
+        
+        for voo in dados['data']:
+            resultado += f"Voo: {voo['flight']['iata']}\n"
+            resultado += f"Companhia: {voo['airline']['name']}\n"
+            resultado += f"Origem: {voo['departure']['airport']}\n"
+            resultado += f"Destino: {voo['arrival']['airport']}\n"
+            resultado += f"Partida: {self.formatar_data(voo['departure']['scheduled'])}\n"
+            resultado += f"Status: {voo['flight_status'].upper()}\n"
+            resultado += "-" * 50 + "\n"
+        
+        self.mostrar_resultado(resultado)
+
+def main():
+    app = SistemaVoos()
+    app.mainloop()  
+    
+if __name__ == "__main__":
+    main()
