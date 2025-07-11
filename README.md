@@ -16,8 +16,9 @@ Busca por código IATA de origem e destino
 Exibição de informações detalhadas dos voos:
 Número do voo e companhia aérea
 Horários de partida e chegada
-Status do voo em tempo real
+# Status do voo em tempo real
 Aeroportos de origem e destino
+![image alt](https://github.com/joelmbele-eng/Sistema-de-Busca-de-Voos-Agencia-de-Viagem/blob/23f4afeb095ccbcc98cc73587228339c8b8ee36c/2.PNG)
 3. Base de Dados de Aeroportos
 Catálogo abrangente com aeroportos de 5 continentes:
 África: Luanda, Joanesburgo, Cairo
